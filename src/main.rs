@@ -1,12 +1,14 @@
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use rand::{rngs::OsRng, RngCore};
 use sha256::digest;
-use std::env;
 use std::io::{Read, Write};
 use std::process::exit;
+use std::sync::{Arc, Mutex};
+use std::{env, thread};
 
 type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
+const NUM_THREADS: usize = 8;
 
 fn main() {
     // Get password from command line arguments
@@ -24,8 +26,8 @@ fn main() {
     let file = &args[3];
 
     // Sanitize file path
-    let file = file.replace("\"", "");
-    let file = file.replace("\'", "");
+    let file = file.replace('\"', "");
+    let file = file.replace('\'', "");
 
     // Check if file is directory
     let is_dir = std::fs::metadata(&file).unwrap().is_dir();
@@ -78,23 +80,43 @@ fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Vec<u8> {
 }
 
 fn encrypt_dir(key: [u8; 32], dir: &str) {
-    let paths = std::fs::read_dir(dir).unwrap();
-
-    for path in paths {
-        let path = path.unwrap().path();
-        let path_str = path.to_str().unwrap();
-
-        if path.is_dir() {
-            encrypt_dir(key, path_str);
-        } else {
-            let plaintext = read_file(path_str);
-            let plaintext = plaintext.as_slice();
-            let iv = gen_iv();
-
-            let ciphertext = encrypt(key, iv, plaintext);
-            let iv_ciphertext = append_iv(&ciphertext, &iv, key.len());
-            write_file(path_str, &iv_ciphertext);
+    let paths = match std::fs::read_dir(dir) {
+        Ok(paths) => paths,
+        Err(_) => {
+            println!("Directory not found");
+            return;
         }
+    };
+
+    let entries: Vec<_> = paths.filter_map(Result::ok).collect();
+    let entries = Arc::new(Mutex::new(entries));
+    let mut handles = vec![];
+
+    for _ in 0..NUM_THREADS {
+        let entries = Arc::clone(&entries);
+        let handle = thread::spawn(move || {
+            while let Some(entry) = entries.lock().unwrap().pop() {
+                let path = entry.path();
+                let path_str = path.to_str().unwrap();
+
+                if path.is_dir() {
+                    encrypt_dir(key, path_str);
+                } else {
+                    let plaintext = read_file(path_str);
+                    let plaintext = plaintext.as_slice();
+                    let iv = gen_iv();
+
+                    let ciphertext = encrypt(key, iv, plaintext);
+                    let iv_ciphertext = append_iv(&ciphertext, &iv, key.len());
+                    write_file(path_str, &iv_ciphertext);
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
     }
 }
 
@@ -114,22 +136,42 @@ fn decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Vec<u8> {
 }
 
 fn decrypt_dir(key: [u8; 32], dir: &str) {
-    let paths = std::fs::read_dir(dir).unwrap();
-
-    for path in paths {
-        let path = path.unwrap().path();
-        let path_str = path.to_str().unwrap();
-
-        if path.is_dir() {
-            decrypt_dir(key, path_str);
-        } else {
-            let ciphertext = read_file(path_str);
-            let ciphertext = ciphertext.as_slice();
-
-            let (iv2, ciphertext2) = extract_iv(ciphertext, key.len());
-            let plaintext2 = decrypt(key, iv2, &ciphertext2);
-            write_file(path_str, &plaintext2);
+    let paths = match std::fs::read_dir(dir) {
+        Ok(paths) => paths,
+        Err(_) => {
+            println!("Directory not found");
+            return;
         }
+    };
+
+    let entries: Vec<_> = paths.filter_map(Result::ok).collect();
+    let entries = Arc::new(Mutex::new(entries));
+    let mut handles = vec![];
+
+    for _ in 0..NUM_THREADS {
+        let entries = Arc::clone(&entries);
+        let handle = thread::spawn(move || {
+            while let Some(entry) = entries.lock().unwrap().pop() {
+                let path = entry.path();
+                let path_str = path.to_str().unwrap();
+
+                if path.is_dir() {
+                    decrypt_dir(key, path_str);
+                } else {
+                    let ciphertext = read_file(path_str);
+                    let ciphertext = ciphertext.as_slice();
+
+                    let (iv2, ciphertext2) = extract_iv(ciphertext, key.len());
+                    let plaintext2 = decrypt(key, iv2, &ciphertext2);
+                    write_file(path_str, &plaintext2);
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
     }
 }
 
@@ -204,7 +246,7 @@ fn write_file(path: &str, data: &[u8]) {
         Ok(file) => file,
         Err(_) => {
             println!("Failed to create file");
-            exit(1);
+            return;
         }
     };
 
