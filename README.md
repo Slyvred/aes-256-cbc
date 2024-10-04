@@ -2,14 +2,16 @@
 
 This Rust program provides a command-line tool for encrypting and decrypting files using AES-256 in CBC mode. The tool uses a password to generate a 256-bit key and a random initialization vector (IV) for encryption.
 
+The IV is stored at an index calculated by dividing the length of the file by the length of the user submitted password
+
 ## Usage
 
 ```sh
-./aes-cbc --<mode> -f <file> -p <password>
+./aes-cbc --<mode> -i <path> -p <password>
 ```
 
 - `--<mode>`: Operation mode, either `enc` for encryption or `dec` for decryption.
-- `-f <file>`: Path to the file to be encrypted or decrypted.
+- `-i <path>`: Path to the file or directory to be encrypted or decrypted.
 - `-p <password>`: Password used to generate the encryption key.
 
 ### Examples
@@ -17,13 +19,13 @@ This Rust program provides a command-line tool for encrypting and decrypting fil
 #### Encrypt a file
 
 ```sh
-./aes-cbc --enc -f example.txt -p mypassword
+./aes-cbc --enc -i example.txt -p mypassword
 ```
 
 #### Decrypt a file
 
 ```sh
-./aes-cbc --dec -f example.txt -p mypassword
+./aes-cbc --dec -i example.txt -p mypassword
 ```
 
 ## Dependencies
@@ -34,44 +36,6 @@ This project uses the following Rust crates:
 - `cbc`: For CBC mode of operation.
 - `rand`: For generating random IVs.
 - `sha256`: For hashing the password to generate a key.
-
-## Functions
-
-### `main()`
-
-The entry point of the program. It parses command-line arguments, determines the mode (encryption or decryption), and calls the appropriate functions.
-
-### `encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Vec<u8>`
-
-Encrypts the plaintext using the provided key and IV.
-
-### `decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Vec<u8>`
-
-Decrypts the ciphertext using the provided key and IV.
-
-### `gen_iv() -> [u8; 16]`
-
-Generates a random IV using `OsRng`.
-
-### `extract_iv(ciphertext: &[u8], password_len: usize) -> ([u8; 16], Vec<u8>)`
-
-Extracts the IV from the ciphertext.
-
-### `append_iv(ciphertext: &[u8], iv: &[u8], password_len: usize) -> Vec<u8>`
-
-Appends the IV to the ciphertext.
-
-### `gen_key_from_password(password: &str) -> [u8; 32]`
-
-Generates a 256-bit key from the provided password using SHA-256.
-
-### `read_file(path: &str) -> Vec<u8>`
-
-Reads the contents of a file and returns it as a `Vec<u8>`.
-
-### `write_file(path: &str, data: &[u8])`
-
-Writes data to a file.
 
 ## License
 

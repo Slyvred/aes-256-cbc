@@ -13,12 +13,12 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() != 6 {
-        println!("Usage: ./aes-cbc --<mode> -f <file> -p <password>");
+        println!("Usage: ./aes-cbc --<mode> -i <path> -p <password>");
         println!("Modes: enc, dec");
         return;
     }
 
-    // Usage: ./aes-cbc --<mode> -f <file> -p <password>
+    // Usage: ./aes-cbc --<mode> -i <path> -p <password>
     // Modes: enc, dec
     let mode = &args[1];
     let file = &args[3];
@@ -27,26 +27,39 @@ fn main() {
     let file = file.replace("\"", "");
     let file = file.replace("\'", "");
 
+    // Check if file is directory
+    let is_dir = std::fs::metadata(&file).unwrap().is_dir();
+
     let password_str = &args[5];
     let key = gen_key_from_password(password_str);
 
     match mode as &str {
         "--enc" => {
-            let plaintext = read_file(&file);
-            let plaintext = plaintext.as_slice();
-            let iv = gen_iv();
+            if is_dir {
+                // Encrypt all files in directory and subdirectories
+                encrypt_dir(key, &file);
+            } else {
+                let plaintext = read_file(&file);
+                let plaintext = plaintext.as_slice();
+                let iv = gen_iv();
 
-            let ciphertext = encrypt(key, iv, plaintext);
-            let iv_ciphertext = append_iv(&ciphertext, &iv, password_str.len());
-            write_file(&file, &iv_ciphertext);
+                let ciphertext = encrypt(key, iv, plaintext);
+                let iv_ciphertext = append_iv(&ciphertext, &iv, password_str.len());
+                write_file(&file, &iv_ciphertext);
+            }
         }
         "--dec" => {
-            let ciphertext = read_file(&file);
-            let ciphertext = ciphertext.as_slice();
+            if is_dir {
+                // Decrypt all files in directory and subdirectories
+                decrypt_dir(key, &file);
+            } else {
+                let ciphertext = read_file(&file);
+                let ciphertext = ciphertext.as_slice();
 
-            let (iv2, ciphertext2) = extract_iv(ciphertext, password_str.len());
-            let plaintext2 = decrypt(key, iv2, &ciphertext2);
-            write_file(&file, &plaintext2);
+                let (iv2, ciphertext2) = extract_iv(ciphertext, password_str.len());
+                let plaintext2 = decrypt(key, iv2, &ciphertext2);
+                write_file(&file, &plaintext2);
+            }
         }
         _ => {
             println!("Invalid mode");
@@ -64,6 +77,27 @@ fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Vec<u8> {
     ct.to_vec()
 }
 
+fn encrypt_dir(key: [u8; 32], dir: &str) {
+    let paths = std::fs::read_dir(dir).unwrap();
+
+    for path in paths {
+        let path = path.unwrap().path();
+        let path_str = path.to_str().unwrap();
+
+        if path.is_dir() {
+            encrypt_dir(key, path_str);
+        } else {
+            let plaintext = read_file(path_str);
+            let plaintext = plaintext.as_slice();
+            let iv = gen_iv();
+
+            let ciphertext = encrypt(key, iv, plaintext);
+            let iv_ciphertext = append_iv(&ciphertext, &iv, key.len());
+            write_file(path_str, &iv_ciphertext);
+        }
+    }
+}
+
 fn decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Vec<u8> {
     let mut buf = vec![0u8; ciphertext.len()];
     buf[..ciphertext.len()].copy_from_slice(ciphertext);
@@ -77,6 +111,26 @@ fn decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Vec<u8> {
     };
 
     pt.to_vec()
+}
+
+fn decrypt_dir(key: [u8; 32], dir: &str) {
+    let paths = std::fs::read_dir(dir).unwrap();
+
+    for path in paths {
+        let path = path.unwrap().path();
+        let path_str = path.to_str().unwrap();
+
+        if path.is_dir() {
+            decrypt_dir(key, path_str);
+        } else {
+            let ciphertext = read_file(path_str);
+            let ciphertext = ciphertext.as_slice();
+
+            let (iv2, ciphertext2) = extract_iv(ciphertext, key.len());
+            let plaintext2 = decrypt(key, iv2, &ciphertext2);
+            write_file(path_str, &plaintext2);
+        }
+    }
 }
 
 // Generate a random IV using OsRng
