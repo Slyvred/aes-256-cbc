@@ -209,4 +209,5 @@ fn write_file(path: &str, data: &[u8]) {
     };
 
     file.write_all(data).unwrap();
+    println!("{}", path);
 }
