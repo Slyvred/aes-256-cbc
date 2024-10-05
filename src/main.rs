@@ -33,7 +33,10 @@ fn main() {
     let is_dir = std::fs::metadata(&file).unwrap().is_dir();
 
     let password_str = &args[5];
-    let key = gen_key_from_password(password_str);
+    let password_str = password_str.replace('\"', "");
+    let password_str = password_str.replace('\'', "");
+
+    let key = gen_key_from_password(password_str.as_str());
 
     match mode as &str {
         "--enc" => {
