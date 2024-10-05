@@ -26,15 +26,13 @@ fn main() {
     let file = &args[3];
 
     // Sanitize file path
-    let file = file.replace('\"', "");
-    let file = file.replace('\'', "");
+    let file = file.replace(['\"', '\''], "");
 
     // Check if file is directory
     let is_dir = std::fs::metadata(&file).unwrap().is_dir();
 
     let password_str = &args[5];
-    let password_str = password_str.replace('\"', "");
-    let password_str = password_str.replace('\'', "");
+    let password_str = password_str.replace(['\"', '\''], "");
 
     let key = gen_key_from_password(password_str.as_str());
 
