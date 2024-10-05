@@ -11,7 +11,7 @@ type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 const NUM_THREADS: usize = 8;
 
-pub fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Vec<u8> {
+fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Vec<u8> {
     let mut buf = vec![0u8; plaintext.len() + 16];
     let pt_len = plaintext.len();
     buf[..pt_len].copy_from_slice(plaintext);
@@ -21,7 +21,19 @@ pub fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Vec<u8> {
     ct.to_vec()
 }
 
-pub fn encrypt_dir(key: [u8; 32], dir: &str) {
+// Wrapper function to encrypt a file
+pub fn encrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
+    let plaintext = read_file(file);
+    let plaintext = plaintext.as_slice();
+    let iv = gen_iv();
+
+    let ciphertext = encrypt(key, iv, plaintext);
+    let iv_ciphertext = append_iv(&ciphertext, &iv, password_len);
+    write_file(file, &iv_ciphertext);
+}
+
+// Encrypt all files in a directory and subdirectories recursively and in parallel
+pub fn encrypt_dir(password_len: usize, key: [u8; 32], dir: &str) {
     let paths = match std::fs::read_dir(dir) {
         Ok(paths) => paths,
         Err(_) => {
@@ -42,15 +54,9 @@ pub fn encrypt_dir(key: [u8; 32], dir: &str) {
                 let path_str = path.to_str().unwrap();
 
                 if path.is_dir() {
-                    encrypt_dir(key, path_str);
+                    encrypt_dir(password_len, key, path_str);
                 } else {
-                    let plaintext = read_file(path_str);
-                    let plaintext = plaintext.as_slice();
-                    let iv = gen_iv();
-
-                    let ciphertext = encrypt(key, iv, plaintext);
-                    let iv_ciphertext = append_iv(&ciphertext, &iv, key.len());
-                    write_file(path_str, &iv_ciphertext);
+                    encrypt_file(path_str, password_len, key);
                 }
             }
         });
@@ -77,7 +83,18 @@ pub fn decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Vec<u8> {
     pt.to_vec()
 }
 
-pub fn decrypt_dir(key: [u8; 32], dir: &str) {
+// Wrapper function to decrypt a file
+pub fn decrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
+    let ciphertext = read_file(file);
+    let ciphertext = ciphertext.as_slice();
+
+    let (iv2, ciphertext2) = extract_iv(ciphertext, password_len);
+    let plaintext2 = decrypt(key, iv2, &ciphertext2);
+    write_file(file, &plaintext2);
+}
+
+// Decrypt all files in a directory and subdirectories recursively and in parallel
+pub fn decrypt_dir(key: [u8; 32], password_len: usize, dir: &str) {
     let paths = match std::fs::read_dir(dir) {
         Ok(paths) => paths,
         Err(_) => {
@@ -98,14 +115,9 @@ pub fn decrypt_dir(key: [u8; 32], dir: &str) {
                 let path_str = path.to_str().unwrap();
 
                 if path.is_dir() {
-                    decrypt_dir(key, path_str);
+                    decrypt_dir(key, password_len, path_str);
                 } else {
-                    let ciphertext = read_file(path_str);
-                    let ciphertext = ciphertext.as_slice();
-
-                    let (iv2, ciphertext2) = extract_iv(ciphertext, key.len());
-                    let plaintext2 = decrypt(key, iv2, &ciphertext2);
-                    write_file(path_str, &plaintext2);
+                    decrypt_file(path_str, password_len, key);
                 }
             }
         });
@@ -149,6 +161,7 @@ pub fn append_iv(ciphertext: &[u8], iv: &[u8], password_len: usize) -> Vec<u8> {
     new_ciphertext
 }
 
+// Generate a 32 byte key from a password string
 pub fn gen_key_from_password(password: &str) -> [u8; 32] {
     let key_str = password.as_bytes();
 
