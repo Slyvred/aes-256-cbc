@@ -23,12 +23,20 @@ fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Vec<u8> {
 
 // Wrapper function to encrypt a file
 pub fn encrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
-    let plaintext = read_file(file);
-    let plaintext = plaintext.as_slice();
-    let iv = gen_iv();
+    let binding = read_file(file);
+    let plaintext = binding.as_slice();
 
+    let iv = gen_iv();
     let ciphertext = encrypt(key, iv, plaintext);
+
+    // Free up memory by dropping binding
+    drop(binding);
+
     let iv_ciphertext = append_iv(&ciphertext, &iv, password_len);
+
+    // Free up memory by dropping ciphertext
+    drop(ciphertext);
+
     write_file(file, &iv_ciphertext);
 }
 
@@ -85,12 +93,20 @@ pub fn decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Vec<u8> {
 
 // Wrapper function to decrypt a file
 pub fn decrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
-    let ciphertext = read_file(file);
-    let ciphertext = ciphertext.as_slice();
+    let binding = read_file(file);
+    let iv_ciphertext = binding.as_slice();
 
-    let (iv2, ciphertext2) = extract_iv(ciphertext, password_len);
-    let plaintext2 = decrypt(key, iv2, &ciphertext2);
-    write_file(file, &plaintext2);
+    let (iv, ciphertext) = extract_iv(iv_ciphertext, password_len);
+
+    // Free up memory by dropping binding
+    drop(binding);
+
+    let plaintext = decrypt(key, iv, &ciphertext);
+
+    // Free up memory by dropping ciphertext
+    drop(ciphertext);
+
+    write_file(file, &plaintext);
 }
 
 // Decrypt all files in a directory and subdirectories recursively and in parallel
@@ -139,7 +155,7 @@ pub fn gen_iv() -> [u8; 16] {
 }
 
 // Remove the IV from the ciphertext and return it
-pub fn extract_iv(ciphertext: &[u8], password_len: usize) -> ([u8; 16], Vec<u8>) {
+fn extract_iv(ciphertext: &[u8], password_len: usize) -> ([u8; 16], Vec<u8>) {
     let iv_index = (ciphertext.len() - 16) / password_len;
     let iv = <[u8; 16]>::try_from(&ciphertext[iv_index..iv_index + 16]).unwrap();
     let mut new_ciphertext = ciphertext.to_vec();
@@ -148,7 +164,7 @@ pub fn extract_iv(ciphertext: &[u8], password_len: usize) -> ([u8; 16], Vec<u8>)
 }
 
 // Append the IV to the ciphertext
-pub fn append_iv(ciphertext: &[u8], iv: &[u8], password_len: usize) -> Vec<u8> {
+fn append_iv(ciphertext: &[u8], iv: &[u8], password_len: usize) -> Vec<u8> {
     // IV is placed at an index calculated by dividing the length of the ciphertext by the password length
     let iv_index = ciphertext.len() / password_len;
 
