@@ -31,10 +31,16 @@ fn encrypt_extension(key: [u8; 32], extension: &[u8]) -> (Vec<u8>, [u8; 16]) {
 
 /// Wrapper function to encrypt a file
 pub fn encrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
-    let binding = read_file(file);
+    let binding = match read_file(file) {
+        Ok(binding) => binding,
+        Err(err) => {
+            println!("{}", err);
+            return;
+        }
+    };
 
     if binding.is_empty() {
-        println!("File not found");
+        println!("File is empty, skipping");
         return;
     }
 
@@ -47,7 +53,11 @@ pub fn encrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
     drop(binding);
 
     // Encrypt the extension
-    let extension = file.split('.').last().unwrap().as_bytes();
+    let extension = match std::path::Path::new(file).extension() {
+        Some(ext) => ext.to_str().unwrap().as_bytes(),
+        None => b"none", // if file has no extension, use "none" as not to break the append_data function
+    };
+
     // let encrypted_extension = encrypt(key, iv, extension);
     let (encrypted_extension, ext_iv) = encrypt_extension(key, extension);
 
@@ -63,7 +73,15 @@ pub fn encrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
     // Free up memory by dropping ciphertext
     drop(ciphertext);
 
-    write_file(file, &final_ciphertext);
+    match write_file(file, &final_ciphertext) {
+        Ok(_) => {
+            println!("{}", file);
+        }
+        Err(err) => {
+            println!("{}", err);
+            return;
+        }
+    }
 
     // Rename the file to have a .bin extension
     let path = std::path::Path::new(file);
@@ -125,10 +143,16 @@ pub fn decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Vec<u8> {
 
 /// Wrapper function to decrypt a file
 pub fn decrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
-    let binding = read_file(file);
+    let binding = match read_file(file) {
+        Ok(binding) => binding,
+        Err(err) => {
+            println!("{}", err);
+            return;
+        }
+    };
 
     if binding.is_empty() {
-        println!("File not found");
+        println!("File is empty, skipping");
         return;
     }
 
@@ -149,12 +173,25 @@ pub fn decrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
     // Free up memory by dropping ciphertext
     drop(ciphertext);
 
-    write_file(file, &plaintext);
+    match write_file(file, &plaintext) {
+        Ok(_) => {
+            println!("{}", file);
+        }
+        Err(err) => {
+            println!("{}", err);
+            return;
+        }
+    }
 
     // Rename the file to have its original extension
     let path = std::path::Path::new(file);
-    let new_file = path.with_extension(extension);
-    std::fs::rename(file, new_file).unwrap();
+    let new_file = path.with_extension(&extension);
+
+    if extension == "none" {
+        std::fs::rename(file, path.with_extension("")).unwrap();
+    } else {
+        std::fs::rename(file, new_file).unwrap();
+    }
 }
 
 /// Decrypt all files in a directory and subdirectories recursively and in parallel
