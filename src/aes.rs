@@ -25,6 +25,12 @@ fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Vec<u8> {
 /// Wrapper function to encrypt a file
 pub fn encrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
     let binding = read_file(file);
+
+    if binding.is_empty() {
+        println!("File not found");
+        return;
+    }
+
     let plaintext = binding.as_slice();
 
     let iv = gen_iv();
@@ -33,16 +39,19 @@ pub fn encrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
     // Free up memory by dropping binding
     drop(binding);
 
+    // Encrypt the extension
     let extension = file.split('.').last().unwrap().as_bytes();
     let encrypted_extension = encrypt(key, iv, extension);
 
-    let iv_ciphertext = append_data(&ciphertext, &iv, password_len, &encrypted_extension);
+    // Append the IV and the encrypted extension to the ciphertext
+    let final_ciphertext = append_data(&ciphertext, &iv, password_len, &encrypted_extension);
 
     // Free up memory by dropping ciphertext
     drop(ciphertext);
 
-    write_file(file, &iv_ciphertext);
+    write_file(file, &final_ciphertext);
 
+    // Rename the file to have a .bin extension
     let path = std::path::Path::new(file);
     let new_file = path.with_extension("bin");
     std::fs::rename(file, new_file).unwrap();
@@ -111,6 +120,7 @@ pub fn decrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
 
     let iv_ciphertext = binding.as_slice();
 
+    // Extract the IV and the encrypted extension from the ciphertext
     let (iv, extension, ciphertext) = extract_data(iv_ciphertext, password_len);
 
     // Decrypt the extension
@@ -127,6 +137,7 @@ pub fn decrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
 
     write_file(file, &plaintext);
 
+    // Rename the file to have its original extension
     let path = std::path::Path::new(file);
     let new_file = path.with_extension(extension);
     std::fs::rename(file, new_file).unwrap();
