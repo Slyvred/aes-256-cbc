@@ -40,7 +40,7 @@ pub fn encrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
     };
 
     if binding.is_empty() {
-        println!("File is empty, skipping");
+        println!("{} skipping (empty)", file);
         return;
     }
 
@@ -152,7 +152,7 @@ pub fn decrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
     };
 
     if binding.is_empty() {
-        println!("File is empty, skipping");
+        println!("{} skipping (empty)", file);
         return;
     }
 

@@ -5,7 +5,7 @@ This Rust program provides a command-line tool for encrypting and decrypting fil
 ## Informations
 
 - The IV is stored at an index calculated by dividing the length of the file by the length of the user submitted password.
-- The file extension is encrypted using our key and IV, and is stored next to it
+- The file extension is encrypted using our key and its own IV that is stored next to our file IV
 - The password is hashed using sha256 to ensure a 32 bytes (256bits) key to meet the AES-256 requirements.
 
 ## Usage
