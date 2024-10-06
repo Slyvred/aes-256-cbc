@@ -22,6 +22,12 @@ fn main() {
     // Sanitize file path
     let file = file.replace(['\"', '\''], "");
 
+    // Check if file exists
+    if !std::path::Path::new(&file).exists() {
+        println!("File not found");
+        return;
+    }
+
     // Check if file is directory
     let is_dir = std::fs::metadata(&file).unwrap().is_dir();
 

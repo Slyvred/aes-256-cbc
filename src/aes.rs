@@ -11,6 +11,7 @@ type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 const NUM_THREADS: usize = 8;
 
+/// Encrypt a plaintext using AES-256-CBC with PKCS7 padding
 fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Vec<u8> {
     let mut buf = vec![0u8; plaintext.len() + 16];
     let pt_len = plaintext.len();
@@ -21,7 +22,7 @@ fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Vec<u8> {
     ct.to_vec()
 }
 
-// Wrapper function to encrypt a file
+/// Wrapper function to encrypt a file
 pub fn encrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
     let binding = read_file(file);
     let plaintext = binding.as_slice();
@@ -32,15 +33,22 @@ pub fn encrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
     // Free up memory by dropping binding
     drop(binding);
 
-    let iv_ciphertext = append_iv(&ciphertext, &iv, password_len);
+    let extension = file.split('.').last().unwrap().as_bytes();
+    let encrypted_extension = encrypt(key, iv, extension);
+
+    let iv_ciphertext = append_data(&ciphertext, &iv, password_len, &encrypted_extension);
 
     // Free up memory by dropping ciphertext
     drop(ciphertext);
 
     write_file(file, &iv_ciphertext);
+
+    let path = std::path::Path::new(file);
+    let new_file = path.with_extension("bin");
+    std::fs::rename(file, new_file).unwrap();
 }
 
-// Encrypt all files in a directory and subdirectories recursively and in parallel
+/// Encrypt all files in a directory and subdirectories recursively and in parallel
 pub fn encrypt_dir(password_len: usize, key: [u8; 32], dir: &str) {
     let paths = match std::fs::read_dir(dir) {
         Ok(paths) => paths,
@@ -76,6 +84,7 @@ pub fn encrypt_dir(password_len: usize, key: [u8; 32], dir: &str) {
     }
 }
 
+/// Decrypt a ciphertext using AES-256-CBC with PKCS7 padding
 pub fn decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Vec<u8> {
     let mut buf = vec![0u8; ciphertext.len()];
     buf[..ciphertext.len()].copy_from_slice(ciphertext);
@@ -91,12 +100,22 @@ pub fn decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Vec<u8> {
     pt.to_vec()
 }
 
-// Wrapper function to decrypt a file
+/// Wrapper function to decrypt a file
 pub fn decrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
     let binding = read_file(file);
+
+    if binding.is_empty() {
+        println!("File not found");
+        return;
+    }
+
     let iv_ciphertext = binding.as_slice();
 
-    let (iv, ciphertext) = extract_iv(iv_ciphertext, password_len);
+    let (iv, extension, ciphertext) = extract_data(iv_ciphertext, password_len);
+
+    // Decrypt the extension
+    let decrypted_extension = decrypt(key, iv, &extension);
+    let extension = String::from_utf8(decrypted_extension).unwrap();
 
     // Free up memory by dropping binding
     drop(binding);
@@ -107,9 +126,13 @@ pub fn decrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
     drop(ciphertext);
 
     write_file(file, &plaintext);
+
+    let path = std::path::Path::new(file);
+    let new_file = path.with_extension(extension);
+    std::fs::rename(file, new_file).unwrap();
 }
 
-// Decrypt all files in a directory and subdirectories recursively and in parallel
+/// Decrypt all files in a directory and subdirectories recursively and in parallel
 pub fn decrypt_dir(key: [u8; 32], password_len: usize, dir: &str) {
     let paths = match std::fs::read_dir(dir) {
         Ok(paths) => paths,
@@ -145,7 +168,7 @@ pub fn decrypt_dir(key: [u8; 32], password_len: usize, dir: &str) {
     }
 }
 
-// Generate a random IV using OsRng
+/// Generate a random IV using OsRng
 pub fn gen_iv() -> [u8; 16] {
     let mut iv = [0u8; 16];
     match OsRng.try_fill_bytes(&mut iv) {
@@ -154,30 +177,35 @@ pub fn gen_iv() -> [u8; 16] {
     }
 }
 
-// Remove the IV from the ciphertext and return it
-fn extract_iv(ciphertext: &[u8], password_len: usize) -> ([u8; 16], Vec<u8>) {
-    let iv_index = (ciphertext.len() - 16) / password_len;
-    let iv = <[u8; 16]>::try_from(&ciphertext[iv_index..iv_index + 16]).unwrap();
-    let mut new_ciphertext = ciphertext.to_vec();
-    new_ciphertext.drain(iv_index..iv_index + 16);
-    (iv, new_ciphertext)
+/// Remove the IV and the encrypted extension from the ciphertext
+fn extract_data(ciphertext: &[u8], password_len: usize) -> ([u8; 16], [u8; 16], Vec<u8>) {
+    let iv_index = (ciphertext.len() - 32) / password_len; // -16 for IV and -16 for extension
+    let ext_index = iv_index + 16; // Index of the extension
+
+    let iv = <[u8; 16]>::try_from(&ciphertext[iv_index..iv_index + 16]).unwrap(); // IV
+    let extension = <[u8; 16]>::try_from(&ciphertext[ext_index..ext_index + 16]).unwrap(); // Extension
+
+    let mut new_ciphertext = ciphertext.to_vec(); // Copy the ciphertext
+    new_ciphertext.drain(iv_index..ext_index + 16); // Remove IV and extension
+    (iv, extension, new_ciphertext)
 }
 
-// Append the IV to the ciphertext
-fn append_iv(ciphertext: &[u8], iv: &[u8], password_len: usize) -> Vec<u8> {
+/// Append the IV and the encrypted extension to the ciphertext
+fn append_data(ciphertext: &[u8], iv: &[u8], password_len: usize, extension: &[u8]) -> Vec<u8> {
     // IV is placed at an index calculated by dividing the length of the ciphertext by the password length
     let iv_index = ciphertext.len() / password_len;
 
     // Create the new ciphertext by collecting the parts
-    let mut new_ciphertext = Vec::with_capacity(ciphertext.len() + iv.len());
+    let mut new_ciphertext = Vec::with_capacity(ciphertext.len() + iv.len() + extension.len());
     new_ciphertext.extend_from_slice(&ciphertext[..iv_index]); // Left part
     new_ciphertext.extend_from_slice(iv); // IV
+    new_ciphertext.extend_from_slice(extension); // Extension
     new_ciphertext.extend_from_slice(&ciphertext[iv_index..]); // Right part
 
     new_ciphertext
 }
 
-// Generate a 32 byte key from a password string
+/// Generate a 32 byte key from a password string
 pub fn gen_key_from_password(password: &str) -> [u8; 32] {
     let key_str = password.as_bytes();
 
