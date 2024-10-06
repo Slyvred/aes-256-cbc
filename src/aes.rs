@@ -22,6 +22,13 @@ fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Vec<u8> {
     ct.to_vec()
 }
 
+/// Encrypts the extension of a file with its own IV
+fn encrypt_extension(key: [u8; 32], extension: &[u8]) -> (Vec<u8>, [u8; 16]) {
+    let iv = gen_iv();
+    let ciphertext = encrypt(key, iv, extension);
+    (ciphertext, iv)
+}
+
 /// Wrapper function to encrypt a file
 pub fn encrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
     let binding = read_file(file);
@@ -41,10 +48,17 @@ pub fn encrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
 
     // Encrypt the extension
     let extension = file.split('.').last().unwrap().as_bytes();
-    let encrypted_extension = encrypt(key, iv, extension);
+    // let encrypted_extension = encrypt(key, iv, extension);
+    let (encrypted_extension, ext_iv) = encrypt_extension(key, extension);
 
     // Append the IV and the encrypted extension to the ciphertext
-    let final_ciphertext = append_data(&ciphertext, &iv, password_len, &encrypted_extension);
+    let final_ciphertext = append_data(
+        &ciphertext,
+        &iv,
+        password_len,
+        &encrypted_extension,
+        &ext_iv,
+    );
 
     // Free up memory by dropping ciphertext
     drop(ciphertext);
@@ -121,10 +135,10 @@ pub fn decrypt_file(file: &str, password_len: usize, key: [u8; 32]) {
     let iv_ciphertext = binding.as_slice();
 
     // Extract the IV and the encrypted extension from the ciphertext
-    let (iv, extension, ciphertext) = extract_data(iv_ciphertext, password_len);
+    let (iv, ext_iv, extension, ciphertext) = extract_data(iv_ciphertext, password_len);
 
     // Decrypt the extension
-    let decrypted_extension = decrypt(key, iv, &extension);
+    let decrypted_extension = decrypt(key, ext_iv, &extension);
     let extension = String::from_utf8(decrypted_extension).unwrap();
 
     // Free up memory by dropping binding
@@ -188,28 +202,38 @@ pub fn gen_iv() -> [u8; 16] {
     }
 }
 
-/// Remove the IV and the encrypted extension from the ciphertext
-fn extract_data(ciphertext: &[u8], password_len: usize) -> ([u8; 16], [u8; 16], Vec<u8>) {
-    let iv_index = (ciphertext.len() - 32) / password_len; // -16 for IV and -16 for extension
-    let ext_index = iv_index + 16; // Index of the extension
+/// Remove the IV, extension IV and the encrypted extension from the ciphertext so it can be decrypted
+fn extract_data(ciphertext: &[u8], password_len: usize) -> ([u8; 16], [u8; 16], [u8; 16], Vec<u8>) {
+    let iv_index = (ciphertext.len() - 48) / password_len; // -16 for IV and -16 for extension and -16 for IV of extension
+    let ext_iv_index = iv_index + 16; // Index of the IV of the extension
+    let ext_index = ext_iv_index + 16; // Index of the extension
 
     let iv = <[u8; 16]>::try_from(&ciphertext[iv_index..iv_index + 16]).unwrap(); // IV
+    let ext_iv = <[u8; 16]>::try_from(&ciphertext[ext_iv_index..ext_iv_index + 16]).unwrap(); // IV of extension
     let extension = <[u8; 16]>::try_from(&ciphertext[ext_index..ext_index + 16]).unwrap(); // Extension
 
     let mut new_ciphertext = ciphertext.to_vec(); // Copy the ciphertext
     new_ciphertext.drain(iv_index..ext_index + 16); // Remove IV and extension
-    (iv, extension, new_ciphertext)
+    (iv, ext_iv, extension, new_ciphertext)
 }
 
-/// Append the IV and the encrypted extension to the ciphertext
-fn append_data(ciphertext: &[u8], iv: &[u8], password_len: usize, extension: &[u8]) -> Vec<u8> {
+/// Append the IV, extension IV and the encrypted extension to the ciphertext
+fn append_data(
+    ciphertext: &[u8],
+    iv: &[u8],
+    password_len: usize,
+    extension: &[u8],
+    ext_iv: &[u8],
+) -> Vec<u8> {
     // IV is placed at an index calculated by dividing the length of the ciphertext by the password length
     let iv_index = ciphertext.len() / password_len;
 
     // Create the new ciphertext by collecting the parts
-    let mut new_ciphertext = Vec::with_capacity(ciphertext.len() + iv.len() + extension.len());
+    let mut new_ciphertext =
+        Vec::with_capacity(ciphertext.len() + iv.len() + ext_iv.len() + extension.len());
     new_ciphertext.extend_from_slice(&ciphertext[..iv_index]); // Left part
     new_ciphertext.extend_from_slice(iv); // IV
+    new_ciphertext.extend_from_slice(ext_iv); // Extension IV
     new_ciphertext.extend_from_slice(extension); // Extension
     new_ciphertext.extend_from_slice(&ciphertext[iv_index..]); // Right part
 
