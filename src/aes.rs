@@ -2,7 +2,7 @@ use crate::file;
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use file::{read_file, write_file};
 use rand::{rngs::OsRng, RngCore};
-use sha256::digest;
+use sha2::{Digest, Sha256};
 use std::process::exit;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -242,14 +242,13 @@ fn append_data(
 
 /// Generate a 32 byte key from a password string
 pub fn gen_key_from_password(password: &str) -> [u8; 32] {
-    let key_str = password.as_bytes();
+    let mut hasher = Sha256::new();
+    hasher.update(password.as_bytes());
+    let result = hasher.finalize();
 
-    // hash the password using SHA256 to get a 32 byte key no matter the length of the password
-    let digest = digest(key_str);
-
-    // convert digest to array of 32 bytes
+    // Convert result to 32-byte array
     let mut key = [0u8; 32];
-    key.clone_from_slice(&digest.as_bytes()[..32]);
+    key.copy_from_slice(&result);
 
     key
 }
