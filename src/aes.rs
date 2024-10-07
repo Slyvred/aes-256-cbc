@@ -13,10 +13,10 @@ const NUM_THREADS: usize = 8;
 
 /// In the encrypted file, the IVs and the encrypted extension are stored at the end of the file
 struct StoredData {
-    key_iv: [u8; 16],
+    password_salt: [u8; 16],
     file_iv: [u8; 16],
-    ext_iv: [u8; 16],
-    extension: [u8; 16],
+    // ext_iv: [u8; 16],
+    // extension: [u8; 16],
 }
 
 /// Encrypt a plaintext using AES-256-CBC with PKCS7 padding
@@ -31,11 +31,11 @@ fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Vec<u8> {
 }
 
 /// Encrypts the extension of a file with its own IV
-fn encrypt_extension(key: [u8; 32], extension: &[u8]) -> (Vec<u8>, [u8; 16]) {
-    let iv = gen_iv();
-    let ciphertext = encrypt(key, iv, extension);
-    (ciphertext, iv)
-}
+// fn encrypt_extension(key: [u8; 32], extension: &[u8]) -> (Vec<u8>, [u8; 16]) {
+//     let iv = gen_iv();
+//     let ciphertext = encrypt(key, iv, extension);
+//     (ciphertext, iv)
+// }
 
 /// Wrapper function to encrypt a file
 pub fn encrypt_file(file: &str, password_str: &str) {
@@ -63,20 +63,20 @@ pub fn encrypt_file(file: &str, password_str: &str) {
     drop(binding);
 
     // Encrypt the extension
-    let extension = match std::path::Path::new(file).extension() {
-        Some(ext) => ext.to_str().unwrap().as_bytes(),
-        None => b"none", // if file has no extension, use "none" as not to break the append_data function
-    };
+    // let extension = match std::path::Path::new(file).extension() {
+    //     Some(ext) => ext.to_str().unwrap().as_bytes(),
+    //     None => b"none", // if file has no extension, use "none" as not to break the append_data function
+    // };
 
     // let encrypted_extension = encrypt(key, iv, extension);
-    let (encrypted_extension, ext_iv) = encrypt_extension(key, extension);
+    //let (encrypted_extension, ext_iv) = encrypt_extension(key, extension);
 
     // Needed data to decrypt the file later
     let stored_data = StoredData {
-        key_iv: salt,
+        password_salt: salt,
         file_iv: iv,
-        ext_iv,
-        extension: encrypted_extension.try_into().unwrap(),
+        // ext_iv,
+        // extension: encrypted_extension.try_into().unwrap(),
     };
 
     // Append the IV and the encrypted extension to the ciphertext
@@ -96,9 +96,7 @@ pub fn encrypt_file(file: &str, password_str: &str) {
     }
 
     // Rename the file to have a .bin extension
-    let path = std::path::Path::new(file);
-    let new_file = path.with_extension("bin");
-    std::fs::rename(file, new_file).unwrap();
+    std::fs::rename(file, format!("{}.enc", file)).unwrap();
 }
 
 /// Encrypt all files in a directory and subdirectories recursively and in parallel
@@ -174,11 +172,11 @@ pub fn decrypt_file(file: &str, password_str: &str) {
     // Extract the IV and the encrypted extension from the ciphertext
     let (extracted_data, ciphertext) = extract_data(iv_ciphertext, password_str.len());
 
-    let key = gen_key_from_password(password_str, &extracted_data.key_iv);
+    let key = gen_key_from_password(password_str, &extracted_data.password_salt);
 
     // Decrypt the extension
-    let decrypted_extension = decrypt(key, extracted_data.ext_iv, &extracted_data.extension);
-    let extension = String::from_utf8(decrypted_extension).unwrap();
+    // let decrypted_extension = decrypt(key, extracted_data.ext_iv, &extracted_data.extension);
+    // let extension = String::from_utf8(decrypted_extension).unwrap();
 
     // Free up memory by dropping binding
     drop(binding);
@@ -199,14 +197,15 @@ pub fn decrypt_file(file: &str, password_str: &str) {
     }
 
     // Rename the file to have its original extension
-    let path = std::path::Path::new(file);
-    let new_file = path.with_extension(&extension);
+    // let path = std::path::Path::new(file);
+    // let new_file = path.with_extension(&extension);
 
-    if extension == "none" {
-        std::fs::rename(file, path.with_extension("")).unwrap();
-    } else {
-        std::fs::rename(file, new_file).unwrap();
-    }
+    // if extension == "none" {
+    //     std::fs::rename(file, path.with_extension("")).unwrap();
+    // } else {
+    //     std::fs::rename(file, new_file).unwrap();
+    // }
+    std::fs::rename(file, file.replace(".enc", "")).unwrap();
 }
 
 /// Decrypt all files in a directory and subdirectories recursively and in parallel
@@ -257,25 +256,36 @@ fn gen_iv() -> [u8; 16] {
 
 /// Remove the IV, extension IV and the encrypted extension from the ciphertext so it can be decrypted
 fn extract_data(ciphertext: &[u8], password_len: usize) -> (StoredData, Vec<u8>) {
-    let file_iv_idx = (ciphertext.len() - 64) / password_len; // -16 * 4 for each field of StoredData
+    let file_iv_idx = (ciphertext.len() - 32) / password_len; // -16 * 2 for each field of StoredData
+    let key_iv_idx = file_iv_idx + 16; // Index of the IV of the key
+
+    /*
     let ext_iv_idx = file_iv_idx + 16; // Index of the IV of the extension
     let key_iv_idx = ext_iv_idx + 16; // Index of the IV of the key
     let ext_index = key_iv_idx + 16; // Index of the extension
+    */
 
     let file_iv = <[u8; 16]>::try_from(&ciphertext[file_iv_idx..file_iv_idx + 16]).unwrap(); // IV
+    let password_salt = <[u8; 16]>::try_from(&ciphertext[key_iv_idx..key_iv_idx + 16]).unwrap(); // password salts
+
+    /*
     let ext_iv = <[u8; 16]>::try_from(&ciphertext[ext_iv_idx..ext_iv_idx + 16]).unwrap(); // IV of extension
     let key_iv = <[u8; 16]>::try_from(&ciphertext[key_iv_idx..key_iv_idx + 16]).unwrap(); // IV of key
     let extension = <[u8; 16]>::try_from(&ciphertext[ext_index..ext_index + 16]).unwrap(); // Extension
+    */
 
     let stored_data = StoredData {
-        key_iv,
+        password_salt,
         file_iv,
-        ext_iv,
-        extension,
+        // ext_iv,
+        // extension,
     };
 
-    let mut cleaned_ciphertext = ciphertext.to_vec(); // Copy the ciphertext
-    cleaned_ciphertext.drain(file_iv_idx..ext_index + 16); // Remove all the IVs and the extension
+    // Copy the ciphertext
+    let mut cleaned_ciphertext = ciphertext.to_vec();
+    //cleaned_ciphertext.drain(file_iv_idx..ext_index + 16); // Remove all the IVs and the extension
+
+    cleaned_ciphertext.drain(file_iv_idx..key_iv_idx + 16); // Remove all the IVs and the extension
     (stored_data, cleaned_ciphertext)
 }
 
@@ -286,26 +296,26 @@ fn append_data(ciphertext: &[u8], password_len: usize, stored_data: &StoredData)
 
     // Create the new ciphertext by collecting the parts
     let mut new_ciphertext = Vec::with_capacity(
-        ciphertext.len()
-            + stored_data.file_iv.len()
-            + stored_data.ext_iv.len()
-            + stored_data.key_iv.len()
-            + stored_data.extension.len(),
+        ciphertext.len() + 64, // 16 * 4 for each field of StoredData
     );
     new_ciphertext.extend_from_slice(&ciphertext[..iv_index]); // Left part
     new_ciphertext.extend_from_slice(&stored_data.file_iv); // File IV
-    new_ciphertext.extend_from_slice(&stored_data.ext_iv); // Extension IV
-    new_ciphertext.extend_from_slice(&stored_data.key_iv); // Key IV
-    new_ciphertext.extend_from_slice(&stored_data.extension); // Extension
+
+    // new_ciphertext.extend_from_slice(&stored_data.ext_iv); // Extension IV
+
+    new_ciphertext.extend_from_slice(&stored_data.password_salt); // password salt
+
+    // new_ciphertext.extend_from_slice(&stored_data.extension); // Extension
+
     new_ciphertext.extend_from_slice(&ciphertext[iv_index..]); // Right part
 
     new_ciphertext
 }
 
 /// Generate a 32 byte key from a password string concatenated with a random salt
-fn gen_key_from_password(password: &str, iv: &[u8]) -> [u8; 32] {
+fn gen_key_from_password(password: &str, salt: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
-    let salted_password = [password.as_bytes(), iv].concat();
+    let salted_password = [password.as_bytes(), salt].concat();
     hasher.update(&salted_password);
     let result = hasher.finalize();
 
