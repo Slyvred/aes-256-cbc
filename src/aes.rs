@@ -1,6 +1,6 @@
-use crate::file;
+use crate::helpers;
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
-use file::{read_file, write_file};
+use helpers::{read_file, write_file};
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use std::process::exit;

@@ -1,6 +1,6 @@
 use std::env;
 mod aes;
-mod file;
+mod helpers;
 
 use aes::{decrypt_dir, decrypt_file, encrypt_dir, encrypt_file, gen_key_from_password};
 
@@ -8,13 +8,13 @@ fn main() {
     // Get password from command line arguments
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 5 {
-        println!("Usage: ./aes-cbc --<mode> <path> -p <password>");
+    if args.len() != 3 {
+        println!("Usage: ./aes-cbc --<mode> <path>");
         println!("Modes: enc, dec");
         return;
     }
 
-    // Usage: ./aes-cbc --<mode> <path> -p <password>
+    // Usage: ./aes-cbc --<mode> <path>
     // Modes: enc, dec
     let mode = &args[1];
     let file = &args[2];
@@ -31,7 +31,7 @@ fn main() {
     // Check if file is directory
     let is_dir = std::fs::metadata(&file).unwrap().is_dir();
 
-    let password_str = &args[4];
+    let password_str = helpers::get_input("Enter password: ");
     let password_str = password_str.replace(['\"', '\''], "");
 
     let key = gen_key_from_password(password_str.as_str());

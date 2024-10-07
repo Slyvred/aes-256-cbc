@@ -28,3 +28,16 @@ pub fn write_file<'a>(path: &'a str, data: &'a [u8]) -> Result<(), &'a str> {
 
     Ok(())
 }
+
+/// Get user input and return it as a String
+pub fn get_input(placeholder: &str) -> String {
+    print!("{}", placeholder);
+    std::io::stdout().flush().expect("Failed to flush stdout");
+
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read input");
+
+    input.trim().to_string()
+}
