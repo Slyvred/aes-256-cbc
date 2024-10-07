@@ -1,3 +1,4 @@
+use rpassword::read_password;
 use std::io::{Read, Write};
 
 /// Read a file into a vector of bytes
@@ -29,15 +30,16 @@ pub fn write_file<'a>(path: &'a str, data: &'a [u8]) -> Result<(), &'a str> {
     Ok(())
 }
 
-/// Get user input and return it as a String
-pub fn get_input(placeholder: &str) -> String {
+/// Get user password and return it as a String
+pub fn get_password(placeholder: &str) -> String {
     print!("{}", placeholder);
     std::io::stdout().flush().expect("Failed to flush stdout");
 
-    let mut input = String::new();
-    std::io::stdin()
-        .read_line(&mut input)
-        .expect("Failed to read input");
-
-    input.trim().to_string()
+    match read_password() {
+        Ok(password) => password,
+        Err(_) => {
+            println!("Failed to read password");
+            std::process::exit(1);
+        }
+    }
 }
