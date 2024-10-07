@@ -32,12 +32,18 @@ fn main() {
     let is_dir = std::fs::metadata(&file).unwrap().is_dir();
 
     let password_str = helpers::get_input("Enter password: ");
-    let password_str = password_str.replace(['\"', '\''], "");
 
     let key = gen_key_from_password(password_str.as_str());
 
     match mode as &str {
         "--enc" => {
+            let confirm_password = helpers::get_input("Confirm password: ");
+
+            if password_str != confirm_password {
+                println!("Passwords do not match !");
+                return;
+            }
+
             if is_dir {
                 // Encrypt all files in directory and subdirectories
                 encrypt_dir(password_str.len(), key, &file);
