@@ -1,34 +1,5 @@
 use rpassword::read_password;
-use std::io::{Read, Write};
-
-/// Read a file into a vector of bytes
-pub fn read_file(path: &str) -> Result<Vec<u8>, &str> {
-    let mut file = match std::fs::File::open(path) {
-        Ok(file) => file,
-        Err(_) => {
-            return Err("File not found");
-        }
-    };
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf).unwrap();
-    Ok(buf)
-}
-
-/// Write a vector of bytes to a file
-pub fn write_file<'a>(path: &'a str, data: &'a [u8]) -> Result<(), &'a str> {
-    let mut file = match std::fs::File::create(path) {
-        Ok(file) => file,
-        Err(_) => {
-            return Err("Failed to create file");
-        }
-    };
-
-    if file.write_all(data).is_err() {
-        return Err("Failed to write to file");
-    }
-
-    Ok(())
-}
+use std::io::Write;
 
 /// Get user password and return it as a String
 pub fn get_password(placeholder: &str) -> String {
@@ -42,4 +13,14 @@ pub fn get_password(placeholder: &str) -> String {
             std::process::exit(1);
         }
     }
+}
+
+pub fn print_progress_bar(progress: f64, filename: &str) {
+    let bar_width = 32;
+    let pos = (bar_width as f64 * progress).round() as usize;
+    let bar: String = (0..bar_width)
+        .map(|i| if i < pos { '=' } else { ' ' })
+        .collect();
+    print!("\r[{}] {}", bar, filename);
+    std::io::stdout().flush().unwrap();
 }

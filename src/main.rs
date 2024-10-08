@@ -2,7 +2,7 @@ use std::env;
 mod aes;
 mod helpers;
 
-use aes::{decrypt_dir, decrypt_file, encrypt_dir, encrypt_file};
+use aes::{decrypt_file, encrypt_file};
 
 fn main() {
     // Get password from command line arguments
@@ -22,14 +22,15 @@ fn main() {
     // Sanitize file path
     let file = file.replace(['\"', '\''], "");
 
-    // Check if file exists
-    if !std::path::Path::new(&file).exists() {
+    // Check if file exists and isn't a directory
+    let path = std::path::Path::new(&file);
+    if !path.exists() {
         println!("File not found");
         return;
+    } else if path.is_dir() {
+        println!("Path is a directory, not a file");
+        return;
     }
-
-    // Check if file is directory
-    let is_dir = std::fs::metadata(&file).unwrap().is_dir();
 
     let password_str = helpers::get_password("Enter password: ");
 
@@ -42,20 +43,10 @@ fn main() {
                 return;
             }
 
-            if is_dir {
-                // Encrypt all files in directory and subdirectories
-                encrypt_dir(&file, &password_str);
-            } else {
-                encrypt_file(&file, &password_str);
-            }
+            encrypt_file(&file, &password_str);
         }
         "--dec" => {
-            if is_dir {
-                // Decrypt all files in directory and subdirectories
-                decrypt_dir(&file, &password_str);
-            } else {
-                decrypt_file(&file, &password_str);
-            }
+            decrypt_file(&file, &password_str);
         }
         _ => {
             println!("Invalid mode");
