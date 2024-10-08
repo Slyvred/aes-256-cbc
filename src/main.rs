@@ -3,6 +3,7 @@ mod aes;
 mod helpers;
 
 use aes::{decrypt_file, encrypt_file};
+use helpers::get_password;
 
 fn main() {
     // Get password from command line arguments
@@ -24,6 +25,7 @@ fn main() {
 
     // Check if file exists and isn't a directory
     let path = std::path::Path::new(&file);
+
     if !path.exists() {
         println!("File not found");
         return;
@@ -32,11 +34,11 @@ fn main() {
         return;
     }
 
-    let password_str = helpers::get_password("Enter password: ");
+    let password_str = get_password("Enter password: ");
 
     match mode as &str {
         "--enc" => {
-            let confirm_password = helpers::get_password("Confirm password: ");
+            let confirm_password = get_password("Confirm password: ");
 
             if password_str != confirm_password {
                 println!("Passwords do not match !");

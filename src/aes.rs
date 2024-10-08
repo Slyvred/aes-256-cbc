@@ -1,11 +1,10 @@
 use crate::helpers;
+use aes::cipher::inout::PadError;
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use helpers::print_progress_bar;
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use std::io::{BufReader, BufWriter, Read, Seek, Write};
-use std::process::exit;
-
 type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 const ENC_BUFFER_SIZE: usize = 8192;
@@ -18,14 +17,14 @@ struct StoredData {
 }
 
 /// Encrypt a plaintext using AES-256-CBC with PKCS7 padding
-fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Vec<u8> {
+fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Result<Vec<u8>, PadError> {
     let mut buf = vec![0u8; plaintext.len() + 16];
     let pt_len = plaintext.len();
     buf[..pt_len].copy_from_slice(plaintext);
-    let ct = Aes256CbcEnc::new(&key.into(), &iv.into())
-        .encrypt_padded_mut::<Pkcs7>(&mut buf, pt_len)
-        .unwrap();
-    ct.to_vec()
+    match Aes256CbcEnc::new(&key.into(), &iv.into()).encrypt_padded_mut::<Pkcs7>(&mut buf, pt_len) {
+        Ok(ct) => Ok(ct.to_vec()),
+        Err(e) => Err(e),
+    }
 }
 
 /// Wrapper function to encrypt a file
@@ -59,7 +58,14 @@ pub fn encrypt_file(path: &str, password_str: &str) {
         let chunk_salt = gen_iv();
         let chunk_key = gen_key_from_password(password_str, &chunk_salt);
         let chunk_iv = gen_iv();
-        let ciphertext = encrypt(chunk_key, chunk_iv, &buf[..bytes_read]);
+
+        let ciphertext = match encrypt(chunk_key, chunk_iv, &buf[..bytes_read]) {
+            Ok(ct) => ct,
+            Err(e) => {
+                println!("Failed to encrypt chunk: {:?}", e);
+                return;
+            }
+        };
 
         let stored_data = StoredData {
             password_salt: chunk_salt,
@@ -80,19 +86,14 @@ pub fn encrypt_file(path: &str, password_str: &str) {
 }
 
 /// Decrypt a ciphertext using AES-256-CBC with PKCS7 padding
-fn decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Vec<u8> {
+fn decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Result<Vec<u8>, &str> {
     let mut buf = vec![0u8; ciphertext.len()];
     buf[..ciphertext.len()].copy_from_slice(ciphertext);
-    let pt = match Aes256CbcDec::new(&key.into(), &iv.into()).decrypt_padded_mut::<Pkcs7>(&mut buf)
-    {
-        Ok(pt) => pt,
-        Err(_) => {
-            println!("Wrong password");
-            exit(1);
-        }
-    };
 
-    pt.to_vec()
+    match Aes256CbcDec::new(&key.into(), &iv.into()).decrypt_padded_mut::<Pkcs7>(&mut buf) {
+        Ok(pt) => Ok(pt.to_vec()),
+        Err(_) => Err("Wrong password"),
+    }
 }
 
 /// Wrapper function to decrypt a file
@@ -126,7 +127,14 @@ pub fn decrypt_file(path: &str, password_str: &str) {
 
         let (stored_data, ciphertext) = extract_data(&buf, password_str.len());
         let chunk_key = gen_key_from_password(password_str, &stored_data.password_salt);
-        let plaintext = decrypt(chunk_key, stored_data.chunk_iv, &ciphertext);
+
+        let plaintext = match decrypt(chunk_key, stored_data.chunk_iv, &ciphertext) {
+            Ok(pt) => pt,
+            Err(e) => {
+                println!("Failed to decrypt chunk: {:?}", e);
+                return;
+            }
+        };
 
         writer.write_all(&plaintext).unwrap();
 
@@ -143,7 +151,14 @@ pub fn decrypt_file(path: &str, password_str: &str) {
 
         let (stored_data, ciphertext) = extract_data(&last_buf, password_str.len());
         let chunk_key = gen_key_from_password(password_str, &stored_data.password_salt);
-        let plaintext = decrypt(chunk_key, stored_data.chunk_iv, &ciphertext);
+
+        let plaintext = match decrypt(chunk_key, stored_data.chunk_iv, &ciphertext) {
+            Ok(pt) => pt,
+            Err(e) => {
+                println!("Failed to decrypt chunk: {:?}", e);
+                return;
+            }
+        };
 
         writer.write_all(&plaintext).unwrap();
     }
