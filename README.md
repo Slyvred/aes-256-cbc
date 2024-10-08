@@ -12,10 +12,11 @@ This project is a file encryption and decryption tool that uses the AES-256 algo
 
 ## How It Works
 
-- The tool generates a key from the password (concatenated with a random salt) using the SHA-256 algorithm
+- The tool generates a key derived from the password (with a random salt) using Argon2.
 - Data is encrypted in 8 KB chunks for efficient processing of large files.
-- Each chunk uses a unique IV and salt to enhance security.
-- The chunks IVs and salts are stored at a dynamic position, calculated by dividing the length of the chunk by the length of the password (not key). This approach provides additional security by making it harder to predict where these elements are stored.
+- The salt of the password is stored in the first 16 bytes of the file.
+- Each chunk uses a unique IV to enhance security.
+- The chunks IVs are stored at a dynamic position, calculated by dividing the length of the chunk by the length of the password (not key). This approach provides additional security by making it harder to predict where these elements are stored.
 
 ## Usage
 
@@ -47,7 +48,7 @@ This project uses the following Rust crates:
 - `aes`: For AES encryption and decryption.
 - `cbc`: For CBC mode of operation.
 - `rand`: For generating random IVs.
-- `sha2`: For hashing the password to generate a key.
+- `rust-argon2`: To derive the key.
 - `rpassword`: To securely input your password.
 
 ## License
