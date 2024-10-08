@@ -1,35 +1,43 @@
 # AES-CBC Encryption/Decryption Tool
 
-This Rust program provides a command-line tool for encrypting and decrypting files using AES-256 in CBC mode. The tool uses a password to generate a 256-bit key and a random initialization vector (IV) for encryption.
+This project is a file encryption and decryption tool that uses the AES-256 algorithm in CBC mode with PKCS7 padding. It allows you to secure files by encrypting them with a password and then decrypting them using the same password.
 
-## Informations
+## Features
 
-- The IV is stored at an index calculated by dividing the length of the file by the length of the user submitted password.
-- The file extension is encrypted using our key and its own IV that is stored next to our file IV
-- The password is hashed using sha256 to ensure a 32 bytes (256bits) key to meet the AES-256 requirements.
+- **AES-256 CBC Encryption**: Protects your files with a password using AES-256 in CBC mode.
+
+- **Decryption**: Restores your encrypted files using the same password.
+
+- **Large File Support**: Chunk processing enables encryption and decryption of files of all sizes without using much memory.
+
+## How It Works
+
+- The tool generates a key from the password (concatenated with a random salt) using the SHA-256 algorithm
+- Data is encrypted in 8 KB chunks for efficient processing of large files.
+- Each chunk uses a unique IV and salt to enhance security.
+- The chunks IVs and salts are stored at a dynamic position, calculated by dividing the length of the chunk by the length of the password (not key). This approach provides additional security by making it harder to predict where these elements are stored.
 
 ## Usage
 
 ```sh
-./aes-cbc --<mode> -i <path> -p <password>
+./aes-cbc --<mode> <path>
 ```
 
 - `--<mode>`: Operation mode, either `enc` for encryption or `dec` for decryption.
-- `-i <path>`: Path to the file or directory to be encrypted or decrypted.
-- `-p <password>`: Password used to generate the encryption key.
+- `<path>`: Path of the file you want to encrypt/decrypt
 
 ### Examples
 
-#### Encrypt a file
+#### Encrypting a file
 
 ```sh
-./aes-cbc --enc -i example.txt -p mypassword
+./aes-cbc --enc example.txt
 ```
 
-#### Decrypt a file
+#### Decrypting a file
 
 ```sh
-./aes-cbc --dec -i example.txt -p mypassword
+./aes-cbc --dec example.txt.enc
 ```
 
 ## Dependencies
@@ -39,7 +47,8 @@ This project uses the following Rust crates:
 - `aes`: For AES encryption and decryption.
 - `cbc`: For CBC mode of operation.
 - `rand`: For generating random IVs.
-- `sha256`: For hashing the password to generate a key.
+- `sha2`: For hashing the password to generate a key.
+- `rpassword`: To securely input your password.
 
 ## License
 
