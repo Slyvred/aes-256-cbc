@@ -1,18 +1,21 @@
 use crate::helpers;
 use aes::cipher::inout::PadError;
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use argon2::{self, Config};
 use helpers::print_progress_bar;
 use rand::{rngs::OsRng, RngCore};
-use sha2::{Digest, Sha256};
 use std::io::{BufReader, BufWriter, Read, Seek, Write};
+
 type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
-const ENC_BUFFER_SIZE: usize = 8192;
-const DEC_BUFFER_SIZE: usize = 8192 + 32 + 16; // 8192 + 32 (= StoredData) + 16 (16 = AES-256 block size)
 
-/// In the encrypted file, the IVs and the encrypted extension are stored at the end of the file
+const ENC_BUFFER_SIZE: usize = 8192;
+const DEC_BUFFER_SIZE: usize = ENC_BUFFER_SIZE + 16 + 16; // 8192 + 16 (= StoredData) + 16 (16 = AES-256 block size)
+const STORED_DATA_SIZE: usize = 16; // Size of the StoredData struct
+
+/// In the encrypted file, the IV of the current chunk is stored inside the chunk itself.
+/// Its position in the chunk is calculated by dividing the length of the ciphertext by the password length
 struct StoredData {
-    password_salt: [u8; 16],
     chunk_iv: [u8; 16],
 }
 
@@ -50,16 +53,20 @@ pub fn encrypt_file(path: &str, password_str: &str) {
     let mut buf = [0u8; ENC_BUFFER_SIZE];
     let file_size = std::fs::metadata(path).unwrap().len();
 
+    // Generate a random salt and derive a key from the password
+    let salt = gen_iv();
+    let key = gen_key_from_password(password_str, &salt);
+
+    // Write the salt to the beginning of the output file
+    writer.write_all(&salt).unwrap();
+
     while let Ok(bytes_read) = reader.read(&mut buf) {
         if bytes_read == 0 {
             break;
         }
-
-        let chunk_salt = gen_iv();
-        let chunk_key = gen_key_from_password(password_str, &chunk_salt);
         let chunk_iv = gen_iv();
 
-        let ciphertext = match encrypt(chunk_key, chunk_iv, &buf[..bytes_read]) {
+        let ciphertext = match encrypt(key, chunk_iv, &buf[..bytes_read]) {
             Ok(ct) => ct,
             Err(e) => {
                 println!("Failed to encrypt chunk: {:?}", e);
@@ -67,10 +74,7 @@ pub fn encrypt_file(path: &str, password_str: &str) {
             }
         };
 
-        let stored_data = StoredData {
-            password_salt: chunk_salt,
-            chunk_iv,
-        };
+        let stored_data = StoredData { chunk_iv };
 
         let final_ciphertext = append_data(&ciphertext, password_str.len(), &stored_data);
         writer.write_all(&final_ciphertext).unwrap();
@@ -119,16 +123,22 @@ pub fn decrypt_file(path: &str, password_str: &str) {
     let mut buf = [0u8; DEC_BUFFER_SIZE];
 
     let file_size = std::fs::metadata(path).unwrap().len();
-    let num_chunks = file_size / DEC_BUFFER_SIZE as u64; // Number of 8KB chunks
-    let remaining_bytes = file_size % DEC_BUFFER_SIZE as u64; // Remaining bytes, that don't fit in a chunk
+    let num_chunks = (file_size - 16) / DEC_BUFFER_SIZE as u64; // Number of 8KB chunks, -16 for the salt
+    let remaining_bytes = (file_size - 16) % DEC_BUFFER_SIZE as u64; // Remaining bytes, that don't fit in a chunk
+
+    // Read the salt from the beginning of the file
+    let mut salt = [0u8; 16];
+    reader.read_exact(&mut salt).unwrap();
+
+    // Derive the key from the password and the salt
+    let key = gen_key_from_password(password_str, &salt);
 
     for _ in 0..num_chunks {
         reader.read_exact(&mut buf).unwrap();
 
         let (stored_data, ciphertext) = extract_data(&buf, password_str.len());
-        let chunk_key = gen_key_from_password(password_str, &stored_data.password_salt);
 
-        let plaintext = match decrypt(chunk_key, stored_data.chunk_iv, &ciphertext) {
+        let plaintext = match decrypt(key, stored_data.chunk_iv, &ciphertext) {
             Ok(pt) => pt,
             Err(e) => {
                 println!("Failed to decrypt chunk: {:?}", e);
@@ -139,7 +149,7 @@ pub fn decrypt_file(path: &str, password_str: &str) {
         writer.write_all(&plaintext).unwrap();
 
         print_progress_bar(
-            reader.stream_position().unwrap() as f64 / file_size as f64,
+            reader.stream_position().unwrap() as f64 / (file_size - 16) as f64,
             path,
         );
     }
@@ -150,9 +160,8 @@ pub fn decrypt_file(path: &str, password_str: &str) {
         reader.read_exact(&mut last_buf).unwrap();
 
         let (stored_data, ciphertext) = extract_data(&last_buf, password_str.len());
-        let chunk_key = gen_key_from_password(password_str, &stored_data.password_salt);
 
-        let plaintext = match decrypt(chunk_key, stored_data.chunk_iv, &ciphertext) {
+        let plaintext = match decrypt(key, stored_data.chunk_iv, &ciphertext) {
             Ok(pt) => pt,
             Err(e) => {
                 println!("Failed to decrypt chunk: {:?}", e);
@@ -178,21 +187,19 @@ fn gen_iv() -> [u8; 16] {
 
 /// Remove the IV, extension IV and the encrypted extension from the ciphertext so it can be decrypted
 fn extract_data(ciphertext: &[u8], password_len: usize) -> (StoredData, Vec<u8>) {
-    let file_iv_idx = (ciphertext.len() - 32) / password_len; // -16 * 2 for each field of StoredData
-    let key_iv_idx = file_iv_idx + 16; // Index of the IV of the key
+    let chunk_iv_idx = (ciphertext.len() - STORED_DATA_SIZE) / password_len; // -16 * 2 for each field of StoredData
+                                                                             //let key_iv_idx = file_iv_idx + 16; // Index of the IV of the key
 
-    let chunk_iv = <[u8; 16]>::try_from(&ciphertext[file_iv_idx..file_iv_idx + 16]).unwrap(); // IV
-    let password_salt = <[u8; 16]>::try_from(&ciphertext[key_iv_idx..key_iv_idx + 16]).unwrap(); // password salts
+    let chunk_iv: [u8; 16] = ciphertext[chunk_iv_idx..chunk_iv_idx + 16]
+        .try_into()
+        .unwrap(); // IVs
 
-    let stored_data = StoredData {
-        password_salt,
-        chunk_iv,
-    };
+    let stored_data = StoredData { chunk_iv };
 
     // Copy the ciphertext
     let mut cleaned_ciphertext = ciphertext.to_vec();
 
-    cleaned_ciphertext.drain(file_iv_idx..key_iv_idx + 16); // Remove all the IVs and the extension
+    cleaned_ciphertext.drain(chunk_iv_idx..chunk_iv_idx + 16); // Remove the IV to return the encrypted data only
     (stored_data, cleaned_ciphertext)
 }
 
@@ -203,26 +210,23 @@ fn append_data(ciphertext: &[u8], password_len: usize, stored_data: &StoredData)
 
     // Create the new ciphertext by collecting the parts
     let mut new_ciphertext = Vec::with_capacity(
-        ciphertext.len() + 32, // 16 * 4 for each field of StoredData
+        ciphertext.len() + STORED_DATA_SIZE, // Each field of StoredData
     );
     new_ciphertext.extend_from_slice(&ciphertext[..iv_index]); // Left part
     new_ciphertext.extend_from_slice(&stored_data.chunk_iv); // IV of current chunk
-    new_ciphertext.extend_from_slice(&stored_data.password_salt); // password salt of current chunk
     new_ciphertext.extend_from_slice(&ciphertext[iv_index..]); // Right part
 
     new_ciphertext
 }
 
-/// Generate a 32 byte key from a password string concatenated with a random salt
+/// Generate a 32-byte key from a password string and a random salt using Argon2id
 fn gen_key_from_password(password: &str, salt: &[u8]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    let salted_password = [password.as_bytes(), salt].concat();
-    hasher.update(&salted_password);
-    let result = hasher.finalize();
+    let key = argon2::hash_raw(password.as_bytes(), salt, &Config::rfc9106_low_mem())
+        .expect("Key derivation failed");
 
-    // Convert result to 32-byte array
-    let mut key = [0u8; 32];
-    key.copy_from_slice(&result);
+    assert_eq!(key.len(), 32); // Ensure the key is 32 bytes long
 
-    key
+    let mut key_array = [0u8; 32];
+    key_array.copy_from_slice(&key); // Copies exactly 32 bytes into the array
+    key_array
 }
