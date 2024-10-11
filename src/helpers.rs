@@ -7,9 +7,16 @@ pub fn get_password(placeholder: &str) -> String {
     std::io::stdout().flush().expect("Failed to flush stdout");
 
     match read_password() {
-        Ok(password) => password,
-        Err(_) => {
-            println!("Failed to read password");
+        Ok(password) => {
+            if password.is_empty() {
+                println!("Password cannot be empty");
+                get_password(placeholder)
+            } else {
+                password
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to read password: {:?}", e);
             std::process::exit(1);
         }
     }

@@ -44,12 +44,15 @@ fn main() {
                 println!("Passwords do not match !");
                 return;
             }
-
-            encrypt_file(&file, &password_str);
+            match encrypt_file(&file, &password_str) {
+                Ok(_) => (),
+                Err(e) => eprintln!("Error: {:?}", e),
+            }
         }
-        "--dec" => {
-            decrypt_file(&file, &password_str);
-        }
+        "--dec" => match decrypt_file(&file, &password_str) {
+            Ok(_) => (),
+            Err(e) => eprintln!("Error: {:?}", e),
+        },
         _ => {
             println!("Invalid mode");
         }

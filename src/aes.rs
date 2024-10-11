@@ -1,4 +1,5 @@
 use crate::helpers;
+use aes::cipher::block_padding::UnpadError;
 use aes::cipher::inout::PadError;
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use argon2::{self, Config};
@@ -31,21 +32,15 @@ fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Result<Vec<u8>, Pad
 }
 
 /// Wrapper function to encrypt a file
-pub fn encrypt_file(path: &str, password_str: &str) {
+pub fn encrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> {
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
-        Err(_) => {
-            println!("File not found");
-            return;
-        }
+        Err(_) => return Err("Failed to open file"),
     };
 
     let output_file = match std::fs::File::create(format!("{}.enc", path)) {
         Ok(file) => file,
-        Err(_) => {
-            println!("Failed to create output file");
-            return;
-        }
+        Err(_) => return Err("Failed to create output file"),
     };
 
     let mut reader = BufReader::new(file);
@@ -68,10 +63,7 @@ pub fn encrypt_file(path: &str, password_str: &str) {
 
         let ciphertext = match encrypt(key, chunk_iv, &buf[..bytes_read]) {
             Ok(ct) => ct,
-            Err(e) => {
-                println!("Failed to encrypt chunk: {:?}", e);
-                return;
-            }
+            Err(_) => return Err("Encryption failed"),
         };
 
         let stored_data = StoredData { chunk_iv };
@@ -87,48 +79,46 @@ pub fn encrypt_file(path: &str, password_str: &str) {
 
     // Print a newline after the progress bar
     println!();
+    Ok(())
 }
 
 /// Decrypt a ciphertext using AES-256-CBC with PKCS7 padding
-fn decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Result<Vec<u8>, &str> {
+fn decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Result<Vec<u8>, UnpadError> {
     let mut buf = vec![0u8; ciphertext.len()];
     buf[..ciphertext.len()].copy_from_slice(ciphertext);
 
     match Aes256CbcDec::new(&key.into(), &iv.into()).decrypt_padded_mut::<Pkcs7>(&mut buf) {
         Ok(pt) => Ok(pt.to_vec()),
-        Err(_) => Err("Wrong password"),
+        Err(e) => Err(e),
     }
 }
 
 /// Wrapper function to decrypt a file
-pub fn decrypt_file(path: &str, password_str: &str) {
+pub fn decrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> {
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
-        Err(_) => {
-            println!("File not found");
-            return;
-        }
+        Err(_) => return Err("Failed to open file"),
     };
 
     let output_file = match std::fs::File::create(path.replace(".enc", "")) {
         Ok(file) => file,
-        Err(_) => {
-            println!("Failed to create output file");
-            return;
-        }
+        Err(_) => return Err("Failed to create output file"),
     };
 
     let mut reader = BufReader::new(file);
     let mut writer = BufWriter::new(output_file);
     let mut buf = [0u8; DEC_BUFFER_SIZE];
 
-    let file_size = std::fs::metadata(path).unwrap().len();
-    let num_chunks = (file_size - 16) / DEC_BUFFER_SIZE as u64; // Number of 8KB chunks, -16 for the salt
-    let remaining_bytes = (file_size - 16) % DEC_BUFFER_SIZE as u64; // Remaining bytes, that don't fit in a chunk
+    let file_size = std::fs::metadata(path).unwrap().len() - 16; // -16 for the salt
+    let num_chunks = file_size / DEC_BUFFER_SIZE as u64; // Number of 8KB chunks, -16 for the salt
+    let remaining_bytes = file_size % DEC_BUFFER_SIZE as u64; // Remaining bytes, that don't fit in a chunk
 
     // Read the salt from the beginning of the file
     let mut salt = [0u8; 16];
-    reader.read_exact(&mut salt).unwrap();
+    match reader.read_exact(&mut salt) {
+        Ok(_) => (),
+        Err(_) => return Err("Failed to read salt, are you sure this file is encrypted?"),
+    }
 
     // Derive the key from the password and the salt
     let key = gen_key_from_password(password_str, &salt);
@@ -140,16 +130,13 @@ pub fn decrypt_file(path: &str, password_str: &str) {
 
         let plaintext = match decrypt(key, stored_data.chunk_iv, &ciphertext) {
             Ok(pt) => pt,
-            Err(e) => {
-                println!("Failed to decrypt chunk: {:?}", e);
-                return;
-            }
+            Err(_) => return Err("Wrong password"),
         };
 
         writer.write_all(&plaintext).unwrap();
 
         print_progress_bar(
-            reader.stream_position().unwrap() as f64 / (file_size - 16) as f64,
+            reader.stream_position().unwrap() as f64 / file_size as f64, // We remove 16 bytes because we don't count the salt stored at the beginning of the file
             path,
         );
     }
@@ -163,10 +150,7 @@ pub fn decrypt_file(path: &str, password_str: &str) {
 
         let plaintext = match decrypt(key, stored_data.chunk_iv, &ciphertext) {
             Ok(pt) => pt,
-            Err(e) => {
-                println!("Failed to decrypt chunk: {:?}", e);
-                return;
-            }
+            Err(_) => return Err("Wrong password"),
         };
 
         writer.write_all(&plaintext).unwrap();
@@ -174,6 +158,7 @@ pub fn decrypt_file(path: &str, password_str: &str) {
 
     // Print a newline after the progress bar
     println!();
+    Ok(())
 }
 
 /// Generate a random IV using OsRng
