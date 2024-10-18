@@ -18,6 +18,14 @@ This project is a file encryption and decryption tool that uses the AES-256 algo
 - Each chunk uses a unique IV to enhance security.
 - The chunks IVs are stored at a dynamic position, calculated by dividing the length of the chunk by the length of the password (not key). This approach provides additional security by making it harder to predict where these elements are stored.
 
+## Installation
+
+Simply run the following command:
+```sh
+cargo install --git https://github.com/Slyvred/aes-256-cbc.git
+
+```
+
 ## Usage
 
 ```sh
