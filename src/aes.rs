@@ -39,7 +39,14 @@ pub fn encrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> 
     };
 
     // Encrypt filename and extension
-    let filename = path.split('/').last().unwrap();
+    let mut filename = path.split('/').last().unwrap();
+
+    // If the split doesn't work, it means we're on Windows
+    // We split on backslashes instead
+    if filename == path {
+        filename = path.split('\\').last().unwrap();
+    }
+
     let filename_salt = gen_iv();
     let filename_key = gen_key_from_password(password_str, &filename_salt);
 
@@ -50,7 +57,7 @@ pub fn encrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> 
 
     // convert encrypted filename to hex string
     let encrypted_filename = hex::encode(encrypted_filename);
-    let output_path = path.replace(path.split('/').last().unwrap(), &encrypted_filename);
+    let output_path = path.replace(filename, &encrypted_filename);
 
     println!("Encrypting {} to {}", path, output_path);
 
@@ -117,8 +124,15 @@ pub fn decrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> 
         Err(_) => return Err("Failed to open file"),
     };
 
-    let encrypted_filename = path.split('/').last().unwrap();
-    let encrypted_filename = hex::decode(encrypted_filename).unwrap();
+    let mut encrypted_filename_str = path.split('/').last().unwrap();
+
+    // If the split doesn't work, it means we're on Windows
+    // We split on backslashes instead
+    if encrypted_filename_str == path {
+        encrypted_filename_str = path.split('\\').last().unwrap();
+    }
+
+    let encrypted_filename = hex::decode(encrypted_filename_str).unwrap();
 
     let mut salts = [0u8; 32];
     let mut reader = BufReader::new(file);
@@ -142,7 +156,7 @@ pub fn decrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> 
     };
 
     let filename = String::from_utf8(filename).unwrap();
-    let output_path = path.replace(path.split('/').last().unwrap(), &filename);
+    let output_path = path.replace(encrypted_filename_str, &filename);
 
     println!("Decrypting {} to {}", path, output_path);
 
