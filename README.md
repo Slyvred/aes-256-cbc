@@ -14,7 +14,8 @@ This project is a file encryption and decryption tool that uses the AES-256 algo
 
 - The tool generates a key derived from the password (with a random salt) using Argon2.
 - Data is encrypted in 8 KB chunks for efficient processing of large files.
-- The salt of the password is stored in the first 16 bytes of the file.
+- The filename is encrypted (with its own IV) to prevent information leakage.
+- The IVs (or salts) of the master key and the filename key are stored in the first 32 bytes of the file.
 - Each chunk uses a unique IV to enhance security.
 - The chunks IVs are stored at a dynamic position, calculated by dividing the length of the chunk by the length of the password (not key). This approach provides additional security by making it harder to predict where these elements are stored.
 
@@ -46,8 +47,9 @@ cargo install --git https://github.com/Slyvred/aes-256-cbc.git
 #### Decrypting a file
 
 ```sh
-./aes-cbc --dec example.txt.enc
+./aes-cbc --dec 070b5d73320bcb7b5b3ad337f42bf9af
 ```
+With `070b5d73320bcb7b5b3ad337f42bf9af` being the encrypted version of `example.txt`.
 
 ## Dependencies
 
@@ -55,6 +57,7 @@ This project uses the following Rust crates:
 
 - `aes`: For AES encryption and decryption.
 - `cbc`: For CBC mode of operation.
+- `hex`: For encoding and decoding hexadecimal strings.
 - `rand`: For generating random IVs.
 - `rust-argon2`: To derive the key.
 - `rpassword`: To securely input your password.
