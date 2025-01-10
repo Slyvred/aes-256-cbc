@@ -10,9 +10,9 @@ use std::io::{BufReader, BufWriter, Read, Seek, Write};
 type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 
-const ENC_BUFFER_SIZE: usize = 8192;
-const DEC_BUFFER_SIZE: usize = ENC_BUFFER_SIZE + 16 + 16; // 8192 + 16 (= StoredData) + 16 (16 = AES-256 block size)
 const STORED_DATA_SIZE: usize = 16; // Size of the StoredData struct
+const ENC_BUFFER_SIZE: usize = 8192;
+const DEC_BUFFER_SIZE: usize = ENC_BUFFER_SIZE + STORED_DATA_SIZE + 16; // 8192 + 16 (= StoredData) + 16 (16 = AES-256 block size)
 
 /// In the encrypted file, the IV of the current chunk is stored inside the chunk itself.
 /// Its position in the chunk is calculated by dividing the length of the ciphertext by the password length
@@ -38,7 +38,23 @@ pub fn encrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> 
         Err(_) => return Err("Failed to open file"),
     };
 
-    let output_file = match std::fs::File::create(format!("{}.enc", path)) {
+    // Encrypt filename and extension
+    let filename = path.split('/').last().unwrap();
+    let filename_salt = gen_iv();
+    let filename_key = gen_key_from_password(password_str, &filename_salt);
+
+    let encrypted_filename = match encrypt(filename_key, filename_salt, filename.as_bytes()) {
+        Ok(ct) => ct,
+        Err(_) => return Err("Filename encryption failed"),
+    };
+
+    // convert encrypted filename to hex string
+    let encrypted_filename = hex::encode(encrypted_filename);
+    let output_path = path.replace(path.split('/').last().unwrap(), &encrypted_filename);
+
+    println!("Encrypting {} to {}", path, output_path);
+
+    let output_file = match std::fs::File::create(output_path) {
         Ok(file) => file,
         Err(_) => return Err("Failed to create output file"),
     };
@@ -52,7 +68,8 @@ pub fn encrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> 
     let salt = gen_iv();
     let key = gen_key_from_password(password_str, &salt);
 
-    // Write the salt to the beginning of the output file
+    // Write the salts to the beginning of the output file
+    writer.write_all(&filename_salt).unwrap();
     writer.write_all(&salt).unwrap();
 
     while let Ok(bytes_read) = reader.read(&mut buf) {
@@ -100,25 +117,46 @@ pub fn decrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> 
         Err(_) => return Err("Failed to open file"),
     };
 
-    let output_file = match std::fs::File::create(path.replace(".enc", "")) {
+    let encrypted_filename = path.split('/').last().unwrap();
+    let encrypted_filename = hex::decode(encrypted_filename).unwrap();
+
+    let mut salts = [0u8; 32];
+    let mut reader = BufReader::new(file);
+
+    // Read the salt from the first 32 bytes of the file
+    match reader.read_exact(&mut salts) {
+        Ok(_) => (),
+        Err(_) => return Err("Failed to read salts, are you sure this file is encrypted?"),
+    }
+
+    // The first 16 bytes are the salt used to encrypt the filename
+    // The next 16 bytes are the salt used to actually encrypt the file
+    let filename_salt: [u8; 16] = salts[..16].try_into().unwrap();
+    let salt: [u8; 16] = salts[16..].try_into().unwrap();
+
+    let filename_key = gen_key_from_password(password_str, &filename_salt);
+
+    let filename = match decrypt(filename_key, filename_salt, &encrypted_filename) {
+        Ok(pt) => pt,
+        Err(_) => return Err("Wrong password"),
+    };
+
+    let filename = String::from_utf8(filename).unwrap();
+    let output_path = path.replace(path.split('/').last().unwrap(), &filename);
+
+    println!("Decrypting {} to {}", path, output_path);
+
+    let output_file = match std::fs::File::create(output_path) {
         Ok(file) => file,
         Err(_) => return Err("Failed to create output file"),
     };
 
-    let mut reader = BufReader::new(file);
     let mut writer = BufWriter::new(output_file);
     let mut buf = [0u8; DEC_BUFFER_SIZE];
 
-    let file_size = std::fs::metadata(path).unwrap().len() - 16; // -16 for the salt
+    let file_size = std::fs::metadata(path).unwrap().len() - 32; // -32 for the two 16 bytes salts
     let num_chunks = file_size / DEC_BUFFER_SIZE as u64; // Number of 8KB chunks, -16 for the salt
     let remaining_bytes = file_size % DEC_BUFFER_SIZE as u64; // Remaining bytes, that don't fit in a chunk
-
-    // Read the salt from the beginning of the file
-    let mut salt = [0u8; 16];
-    match reader.read_exact(&mut salt) {
-        Ok(_) => (),
-        Err(_) => return Err("Failed to read salt, are you sure this file is encrypted?"),
-    }
 
     // Derive the key from the password and the salt
     let key = gen_key_from_password(password_str, &salt);
