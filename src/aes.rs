@@ -49,8 +49,9 @@ pub fn encrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> 
 
     let filename_salt = gen_iv();
     let filename_key = gen_key_from_password(password_str, &filename_salt);
+    let filename_iv = gen_iv();
 
-    let encrypted_filename = match encrypt(filename_key, filename_salt, filename.as_bytes()) {
+    let encrypted_filename = match encrypt(filename_key, filename_iv, filename.as_bytes()) {
         Ok(ct) => ct,
         Err(_) => return Err("Filename encryption failed"),
     };
@@ -76,7 +77,9 @@ pub fn encrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> 
     let key = gen_key_from_password(password_str, &salt);
 
     // Write the salts to the beginning of the output file
+    // Header: [filename_salt][filename_iv][salt] = 16 + 16 + 16 = 48 bytes
     writer.write_all(&filename_salt).unwrap();
+    writer.write_all(&filename_iv).unwrap();
     writer.write_all(&salt).unwrap();
 
     while let Ok(bytes_read) = reader.read(&mut buf) {
@@ -134,23 +137,28 @@ pub fn decrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> 
 
     let encrypted_filename = hex::decode(encrypted_filename_str).unwrap();
 
-    let mut salts = [0u8; 32];
+    // Read the salts and the IV from the beginning of the file
+    // Acts like a header for the encrypted file
+    let mut file_header = [0u8; 48];
     let mut reader = BufReader::new(file);
 
     // Read the salt from the first 32 bytes of the file
-    match reader.read_exact(&mut salts) {
+    match reader.read_exact(&mut file_header) {
         Ok(_) => (),
         Err(_) => return Err("Failed to read salts, are you sure this file is encrypted?"),
     }
 
-    // The first 16 bytes are the salt used to encrypt the filename
-    // The next 16 bytes are the salt used to actually encrypt the file
-    let filename_salt: [u8; 16] = salts[..16].try_into().unwrap();
-    let salt: [u8; 16] = salts[16..].try_into().unwrap();
+    // The first 16 bytes are the salt of the filename key
+    // The next 16 bytes are the IV used to encrypt the filename
+    // The last 16 bytes are the salt of the data key
+    // Header: [filename_salt][filename_iv][salt] = 16 + 16 + 16 = 48 bytes
+    let filename_salt: [u8; 16] = file_header[..16].try_into().unwrap();
+    let filename_iv: [u8; 16] = file_header[16..32].try_into().unwrap();
+    let salt: [u8; 16] = file_header[32..].try_into().unwrap();
 
     let filename_key = gen_key_from_password(password_str, &filename_salt);
 
-    let filename = match decrypt(filename_key, filename_salt, &encrypted_filename) {
+    let filename = match decrypt(filename_key, filename_iv, &encrypted_filename) {
         Ok(pt) => pt,
         Err(_) => return Err("Wrong password"),
     };
@@ -168,7 +176,7 @@ pub fn decrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> 
     let mut writer = BufWriter::new(output_file);
     let mut buf = [0u8; DEC_BUFFER_SIZE];
 
-    let file_size = std::fs::metadata(path).unwrap().len() - 32; // -32 for the two 16 bytes salts
+    let file_size = std::fs::metadata(path).unwrap().len() - 48; // -48 bytes for the header size
     let num_chunks = file_size / DEC_BUFFER_SIZE as u64; // Number of 8KB chunks, -16 for the salt
     let remaining_bytes = file_size % DEC_BUFFER_SIZE as u64; // Remaining bytes, that don't fit in a chunk
 
