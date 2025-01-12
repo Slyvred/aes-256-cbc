@@ -34,6 +34,7 @@ cargo install --git https://github.com/Slyvred/aes-256-cbc.git
 ```
 
 - `--<mode>`: Operation mode, either `enc` for encryption or `dec` for decryption.
+- `--del`: Optional flag to delete the original file after encryption/decryption.
 - `<path>`: Path of the file you want to encrypt/decrypt
 
 ### Examples
@@ -47,9 +48,9 @@ cargo install --git https://github.com/Slyvred/aes-256-cbc.git
 #### Decrypting a file
 
 ```sh
-./aes-cbc --dec 070b5d73320bcb7b5b3ad337f42bf9af
+./aes-cbc --dec --del 070b5d73320bcb7b5b3ad337f42bf9af
 ```
-With `070b5d73320bcb7b5b3ad337f42bf9af` being the encrypted version of `example.txt`.
+With `070b5d73320bcb7b5b3ad337f42bf9af` being the encrypted version of `example.txt`. `--del` will delete the encrypted file after decryption.
 
 ## Dependencies
 
