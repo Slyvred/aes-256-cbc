@@ -32,7 +32,7 @@ fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Result<Vec<u8>, Pad
 }
 
 /// Wrapper function to encrypt a file
-pub fn encrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> {
+pub fn encrypt_file(path: &str, password_str: &str, delete: bool) -> Result<(), &'static str> {
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
         Err(_) => return Err("Failed to open file"),
@@ -106,6 +106,14 @@ pub fn encrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> 
 
     // Print a newline after the progress bar
     println!();
+
+    if delete {
+        match std::fs::remove_file(path) {
+            Ok(_) => (),
+            Err(_) => return Err("Failed to delete original file"),
+        }
+    }
+
     Ok(())
 }
 
@@ -121,7 +129,7 @@ fn decrypt(key: [u8; 32], iv: [u8; 16], ciphertext: &[u8]) -> Result<Vec<u8>, Un
 }
 
 /// Wrapper function to decrypt a file
-pub fn decrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> {
+pub fn decrypt_file(path: &str, password_str: &str, delete: bool) -> Result<(), &'static str> {
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
         Err(_) => return Err("Failed to open file"),
@@ -218,6 +226,14 @@ pub fn decrypt_file(path: &str, password_str: &str) -> Result<(), &'static str> 
 
     // Print a newline after the progress bar
     println!();
+
+    if delete {
+        match std::fs::remove_file(path) {
+            Ok(_) => (),
+            Err(_) => return Err("Failed to delete original file"),
+        }
+    }
+
     Ok(())
 }
 

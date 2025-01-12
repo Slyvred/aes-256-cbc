@@ -9,16 +9,32 @@ fn main() {
     // Get password from command line arguments
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 3 {
+    if args.len() < 3 || args.len() > 4 {
         println!("Usage: ./aes-cbc --<mode> <path>");
         println!("Modes: enc, dec");
+        println!("Optional: --del to delete original file after encryption/decryption");
         return;
     }
 
-    // Usage: ./aes-cbc --<mode> <path>
-    // Modes: enc, dec
-    let mode = &args[1];
-    let file = &args[2];
+    // Parse command line arguments
+    let mut mode = "";
+    let mut file = "";
+    let mut delete = false;
+
+    for arg in args.iter() {
+        if arg.starts_with("--") {
+            if arg == "--enc" || arg == "--dec" {
+                mode = arg;
+            } else if arg == "--del" {
+                delete = true;
+            } else {
+                println!("Unknown argument: {}", arg);
+                return;
+            }
+        } else {
+            file = arg;
+        }
+    }
 
     // Sanitize file path
     let file = file.replace(['\"', '\''], "");
@@ -44,12 +60,12 @@ fn main() {
                 println!("Passwords do not match !");
                 return;
             }
-            match encrypt_file(&file, &password_str) {
+            match encrypt_file(&file, &password_str, delete) {
                 Ok(_) => (),
                 Err(e) => eprintln!("Error: {:?}", e),
             }
         }
-        "--dec" => match decrypt_file(&file, &password_str) {
+        "--dec" => match decrypt_file(&file, &password_str, delete) {
             Ok(_) => (),
             Err(e) => eprintln!("Error: {:?}", e),
         },
