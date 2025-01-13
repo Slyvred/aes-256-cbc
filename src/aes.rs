@@ -143,7 +143,10 @@ pub fn decrypt_file(path: &str, password_str: &str, delete: bool) -> Result<(), 
         encrypted_filename_str = path.split('\\').last().unwrap();
     }
 
-    let encrypted_filename = hex::decode(encrypted_filename_str).unwrap();
+    let encrypted_filename = match hex::decode(encrypted_filename_str) {
+        Ok(hex) => hex,
+        Err(_) => return Err("Failed to decode filename hex"),
+    };
 
     // Read the salts and the IV from the beginning of the file
     // Acts like a header for the encrypted file
