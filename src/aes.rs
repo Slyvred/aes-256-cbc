@@ -56,7 +56,7 @@ pub fn encrypt_file(path: &str, password_str: &str, delete: bool) -> Result<(), 
         Err(_) => return Err("Filename encryption failed"),
     };
 
-    // convert encrypted filename to hex string
+    // Convert encrypted filename to hex string
     let encrypted_filename = hex::encode(encrypted_filename);
     let output_path = path.replace(filename, &encrypted_filename);
 
@@ -153,7 +153,7 @@ pub fn decrypt_file(path: &str, password_str: &str, delete: bool) -> Result<(), 
     let mut file_header = [0u8; 48];
     let mut reader = BufReader::new(file);
 
-    // Read the salt from the first 32 bytes of the file
+    // Read the salt from the first 48 bytes of the file
     match reader.read_exact(&mut file_header) {
         Ok(_) => (),
         Err(_) => return Err("Failed to read salts, are you sure this file is encrypted?"),
@@ -267,7 +267,7 @@ fn extract_data(ciphertext: &[u8], password_len: usize) -> (StoredData, Vec<u8>)
     (stored_data, cleaned_ciphertext)
 }
 
-/// Append the IV, extension IV and the encrypted extension to the ciphertext
+/// Append the IV to the ciphertext
 fn append_data(ciphertext: &[u8], password_len: usize, stored_data: &StoredData) -> Vec<u8> {
     // IV is placed at an index calculated by dividing the length of the ciphertext by the password length
     let iv_index = ciphertext.len() / password_len;

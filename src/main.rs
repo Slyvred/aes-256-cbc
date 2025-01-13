@@ -6,7 +6,7 @@ use aes::{decrypt_file, encrypt_file};
 use helpers::get_password;
 
 fn main() {
-    // Get password from command line arguments
+    // Get command line arguments
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 3 || args.len() > 4 {
