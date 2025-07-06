@@ -17,7 +17,7 @@ This project is a file encryption and decryption tool that uses the AES-256 algo
 - The filename is encrypted with its own IV and key (we derive a new key from the password using another random salt) to prevent information leakage.
 - The salt of the filename key, the filename iv and the master key salt are stored in the first 48 bytes of the file as follows: `filename_salt|filename_iv|masterkey_salt`.
 - Each chunk uses a unique IV to enhance security.
-- The chunks IVs are stored at a dynamic position, calculated by dividing the length of the chunk by the length of the password (not key). This approach provides additional security by making it harder to predict where these elements are stored.
+- The chunks IVs are stored in the first 16 bytes of the chunk, allowing for decryption without needing to read the entire file into memory.
 
 ## Installation
 

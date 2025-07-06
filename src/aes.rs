@@ -10,15 +10,9 @@ use std::io::{BufReader, BufWriter, Read, Seek, Write};
 type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 
-const STORED_DATA_SIZE: usize = 16; // Size of the StoredData struct
+const STORED_DATA_SIZE: usize = 16; // Chunk IV Size
 const ENC_BUFFER_SIZE: usize = 8192;
 const DEC_BUFFER_SIZE: usize = ENC_BUFFER_SIZE + STORED_DATA_SIZE + 16; // 8192 + 16 (= StoredData) + 16 (16 = AES-256 block size)
-
-/// In the encrypted file, the IV of the current chunk is stored inside the chunk itself.
-/// Its position in the chunk is calculated by dividing the length of the ciphertext by the password length
-struct StoredData {
-    chunk_iv: [u8; 16],
-}
 
 /// Encrypt a plaintext using AES-256-CBC with PKCS7 padding
 fn encrypt(key: [u8; 32], iv: [u8; 16], plaintext: &[u8]) -> Result<Vec<u8>, PadError> {
@@ -93,10 +87,9 @@ pub fn encrypt_file(path: &str, password_str: &str, delete: bool) -> Result<(), 
             Err(_) => return Err("Encryption failed"),
         };
 
-        let stored_data = StoredData { chunk_iv };
-
-        let final_ciphertext = append_data(&ciphertext, password_str.len(), &stored_data);
-        writer.write_all(&final_ciphertext).unwrap();
+        // Chunk = IV + Ciphertext
+        writer.write_all(&chunk_iv).unwrap();
+        writer.write_all(&ciphertext).unwrap();
 
         print_progress_bar(
             reader.stream_position().unwrap() as f64 / file_size as f64,
@@ -197,9 +190,10 @@ pub fn decrypt_file(path: &str, password_str: &str, delete: bool) -> Result<(), 
     for _ in 0..num_chunks {
         reader.read_exact(&mut buf).unwrap();
 
-        let (stored_data, ciphertext) = extract_data(&buf, password_str.len());
+        let chunk_iv: [u8; 16] = buf[..16].try_into().unwrap();
+        let ciphertext = &buf[16..];
 
-        let plaintext = match decrypt(key, stored_data.chunk_iv, &ciphertext) {
+        let plaintext = match decrypt(key, chunk_iv, &ciphertext) {
             Ok(pt) => pt,
             Err(_) => return Err("Wrong password"),
         };
@@ -217,9 +211,10 @@ pub fn decrypt_file(path: &str, password_str: &str, delete: bool) -> Result<(), 
         let mut last_buf = vec![0u8; remaining_bytes as usize];
         reader.read_exact(&mut last_buf).unwrap();
 
-        let (stored_data, ciphertext) = extract_data(&last_buf, password_str.len());
+        let chunk_iv: [u8; 16] = last_buf[..16].try_into().unwrap();
+        let ciphertext = &last_buf[16..];
 
-        let plaintext = match decrypt(key, stored_data.chunk_iv, &ciphertext) {
+        let plaintext = match decrypt(key, chunk_iv, &ciphertext) {
             Ok(pt) => pt,
             Err(_) => return Err("Wrong password"),
         };
@@ -247,40 +242,6 @@ fn gen_iv() -> [u8; 16] {
         Ok(_) => iv,
         Err(_) => panic!("Failed to generate IV"),
     }
-}
-
-/// Remove the IV, extension IV and the encrypted extension from the ciphertext so it can be decrypted
-fn extract_data(ciphertext: &[u8], password_len: usize) -> (StoredData, Vec<u8>) {
-    let chunk_iv_idx = (ciphertext.len() - STORED_DATA_SIZE) / password_len; // -16 * 2 for each field of StoredData
-                                                                             //let key_iv_idx = file_iv_idx + 16; // Index of the IV of the key
-
-    let chunk_iv: [u8; 16] = ciphertext[chunk_iv_idx..chunk_iv_idx + 16]
-        .try_into()
-        .unwrap(); // IVs
-
-    let stored_data = StoredData { chunk_iv };
-
-    // Copy the ciphertext
-    let mut cleaned_ciphertext = ciphertext.to_vec();
-
-    cleaned_ciphertext.drain(chunk_iv_idx..chunk_iv_idx + 16); // Remove the IV to return the encrypted data only
-    (stored_data, cleaned_ciphertext)
-}
-
-/// Append the IV to the ciphertext
-fn append_data(ciphertext: &[u8], password_len: usize, stored_data: &StoredData) -> Vec<u8> {
-    // IV is placed at an index calculated by dividing the length of the ciphertext by the password length
-    let iv_index = ciphertext.len() / password_len;
-
-    // Create the new ciphertext by collecting the parts
-    let mut new_ciphertext = Vec::with_capacity(
-        ciphertext.len() + STORED_DATA_SIZE, // Each field of StoredData
-    );
-    new_ciphertext.extend_from_slice(&ciphertext[..iv_index]); // Left part
-    new_ciphertext.extend_from_slice(&stored_data.chunk_iv); // IV of current chunk
-    new_ciphertext.extend_from_slice(&ciphertext[iv_index..]); // Right part
-
-    new_ciphertext
 }
 
 /// Generate a 32-byte key from a password string and a random salt using Argon2id
